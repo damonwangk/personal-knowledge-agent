@@ -1,34 +1,39 @@
 # Personal Knowledge Agent
 
-本项目是一个 Python 本地优先个人知识库 Agent。基础版使用 LangGraph 组织导入、问答和摘要流程，支持导入 Markdown、TXT、PDF 和网页，使用本地 `sentence-transformers/all-MiniLM-L6-v2` 生成 embedding，使用 Chroma 做本地持久化向量数据库，默认使用 DeepSeek 生成带引用回答。
+Personal Knowledge Agent 是一个 Python 本地优先个人知识库 Agent。它使用 LangGraph 组织导入、问答和摘要流程，支持导入 Markdown、TXT、PDF 和网页，使用本地 `sentence-transformers/all-MiniLM-L6-v2` 生成 embedding，使用 Chroma 做本地持久化向量数据库，默认通过 DeepSeek 生成带引用回答。
 
-## 为什么这样选型
+## 项目特性
 
-- 你的电脑是 Apple M4、16GB 内存、约 65GB 可用空间，适合小型本地向量库和 80MB 级别 embedding 模型。
-- DeepSeek API 兼容 OpenAI SDK，代码里默认 `base_url=https://api.deepseek.com`，模型默认 `deepseek-v4-flash`。
-- Chroma 官方支持 Python 本地运行和持久化；对个人知识库比远程向量数据库更合适。
-- MiniLM 输出 384 维向量，体积小，CPU 可跑，适合本机小数据量样例。
-- LangGraph 用来表达 workflow 节点，基础版保持三条图：`ingest`、`ask`、`summarize`。
-- 增量索引用 `.pka/manifest.json` 记录 source hash，未变化文件会跳过，变化文件会先删除旧 chunk 再重建。
-- 检索使用 hybrid 策略：向量召回 + 关键词召回，按简单融合分数排序。
+- 本地优先：文档索引和向量库默认保存在本地 `.pka/` 目录。
+- 可追溯回答：回答会附带 Markdown 行号、PDF 页码或网页 URL 引用。
+- LangGraph 工作流：`ingest`、`ask`、`summarize` 三条流程都由显式 graph 节点组织。
+- DeepSeek 默认模型：DeepSeek API 兼容 OpenAI SDK，默认 `base_url=https://api.deepseek.com`，模型默认 `deepseek-v4-flash`。
+- 轻量 embedding：默认使用 `sentence-transformers/all-MiniLM-L6-v2`，适合本地小型知识库和示例数据。
+- 本地向量库：使用 Chroma 持久化索引，不依赖远程向量数据库。
+- 增量索引：使用 `.pka/manifest.json` 记录 source hash，未变化文件会跳过，变化文件会先删除旧 chunk 再重建。
+- 混合检索：向量召回 + 关键词召回，按简单融合分数排序。
 
 ## 快速开始
 
 ```bash
-cd /Users/x-1w/Project_codex/personal-knowledge-agent
-/opt/miniconda3/envs/test1-rag/bin/python -m pip install -e .
+git clone https://github.com/damonwangk/personal-knowledge-agent.git
+cd personal-knowledge-agent
 
-/opt/miniconda3/envs/test1-rag/bin/python scripts/download_sample_data.py
-/opt/miniconda3/envs/test1-rag/bin/python -m pka init
-/opt/miniconda3/envs/test1-rag/bin/python -m pka ingest data
-/opt/miniconda3/envs/test1-rag/bin/python -m pka ask "这些资料里如何描述检索增强生成？"
-/opt/miniconda3/envs/test1-rag/bin/python -m pka summarize data/notes/rag_agent_design.md
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install -e .
+
+python scripts/download_sample_data.py
+python -m pka init
+python -m pka ingest data
+python -m pka ask "what is RAG?"
+python -m pka summarize data/notes/rag_agent_design.md
 ```
 
 如果要让模型生成自然语言回答：
 
 ```bash
-export DEEPSEEK_API_KEY="你的 key"
+export DEEPSEEK_API_KEY="<your-deepseek-api-key>"
 pka ask "这些资料里有哪些 agent 设计原则？"
 ```
 
