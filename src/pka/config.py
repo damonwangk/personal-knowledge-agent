@@ -18,6 +18,12 @@ class AppConfig:
     chunk_size_chars: int
     chunk_overlap_chars: int
     top_k: int
+    candidate_k: int
+    rerank_enabled: bool
+    rerank_model: str
+    pdf_ocr_enabled: bool
+    pdf_ocr_language: str
+    pdf_min_extracted_chars: int
 
 
 def load_config(project_root: Path | None = None) -> AppConfig:
@@ -30,6 +36,8 @@ def load_config(project_root: Path | None = None) -> AppConfig:
     embedding = data.get("embedding", {})
     llm = data.get("llm", {})
     retrieval = data.get("retrieval", {})
+    rerank = data.get("rerank", {})
+    pdf = data.get("pdf", {})
 
     return AppConfig(
         root=root,
@@ -41,4 +49,10 @@ def load_config(project_root: Path | None = None) -> AppConfig:
         chunk_size_chars=int(retrieval.get("chunk_size_chars", 1600)),
         chunk_overlap_chars=int(retrieval.get("chunk_overlap_chars", 220)),
         top_k=int(retrieval.get("top_k", 5)),
+        candidate_k=int(retrieval.get("candidate_k", max(int(retrieval.get("top_k", 5)) * 2, 10))),
+        rerank_enabled=bool(rerank.get("enabled", True)),
+        rerank_model=rerank.get("model", "cross-encoder/ms-marco-MiniLM-L-6-v2"),
+        pdf_ocr_enabled=bool(pdf.get("ocr_enabled", True)),
+        pdf_ocr_language=pdf.get("ocr_language", "eng+chi_sim"),
+        pdf_min_extracted_chars=int(pdf.get("min_extracted_chars", 80)),
     )

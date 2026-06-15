@@ -4,14 +4,17 @@ from pathlib import Path
 
 import chromadb
 
+from .bm25 import BM25Index
 from .chunking import Chunk
-from .query import expand_query, tokenize_query
+from .query import expand_query
 
 
 class VectorStore:
     def __init__(self, index_dir: Path) -> None:
+        self.index_dir = index_dir
         self.client = chromadb.PersistentClient(path=str(index_dir / "chroma"))
         self.collection = self.client.get_or_create_collection(name="knowledge")
+        self.bm25 = BM25Index(index_dir)
 
     def upsert(self, chunks: list[Chunk], embeddings: list[list[float]]) -> None:
         if not chunks:
@@ -52,27 +55,7 @@ class VectorStore:
 
     def keyword_query(self, query: str, top_k: int) -> list[dict]:
         expanded_query = expand_query(query)
-        terms = tokenize_query(expanded_query)
-        if not terms:
-            return []
-
-        result = self.collection.get(include=["documents", "metadatas"])
-        rows: list[dict] = []
-        for chunk_id, document, metadata in zip(result["ids"], result["documents"], result["metadatas"]):
-            if not document:
-                continue
-            score = keyword_score(document, terms, expanded_query, metadata)
-            if score > 0:
-                rows.append(
-                    {
-                        "id": chunk_id,
-                        "text": document,
-                        "metadata": metadata,
-                        "keyword_score": score,
-                    }
-                )
-        rows.sort(key=lambda row: row["keyword_score"], reverse=True)
-        return rows[:top_k]
+        return self.bm25.search(expanded_query, top_k)
 
     def hybrid_query(self, embedding: list[float], query: str, top_k: int) -> list[dict]:
         vector_rows = self.query(embedding, top_k)
@@ -94,19 +77,17 @@ class VectorStore:
 
         return sorted(merged.values(), key=lambda row: row.get("hybrid_score", 0), reverse=True)[:top_k]
 
+    def rebuild_bm25(self) -> None:
+        rows = self.all_documents()
+        self.bm25.save(rows)
 
-def keyword_score(text: str, terms: list[str], query: str, metadata: dict) -> float:
-    lower = text.lower()
-    title = str(metadata.get("title", "")).lower()
-    score = sum(lower.count(term) for term in terms)
-
-    # 缩写定义常出现在标题、摘要页或文档开头，这里给定义页一点优先级。
-    if "retrieval augmented generation" in query.lower() and "retrieval-augmented generation" in lower:
-        score += 25
-    if any(term in title for term in terms):
-        score += 5
-    if metadata.get("page") == 1:
-        score += 4
-    if metadata.get("start_char") == 0:
-        score += 2
-    return score
+    def all_documents(self) -> list[dict]:
+        result = self.collection.get(include=["documents", "metadatas"])
+        return [
+            {
+                "id": chunk_id,
+                "text": document or "",
+                "metadata": metadata or {},
+            }
+            for chunk_id, document, metadata in zip(result["ids"], result["documents"], result["metadatas"])
+        ]

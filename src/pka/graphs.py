@@ -12,6 +12,7 @@ from .index_manifest import IndexManifest, SourceRecord
 from .llm import answer_with_deepseek, format_source, summarize_with_deepseek
 from .loaders import SourceDocument, discover_sources, load_input, source_fingerprint
 from .query import expand_query
+from .rerank import CrossEncoderReranker
 from .vector_store import VectorStore
 
 
@@ -64,10 +65,12 @@ def build_ask_graph():
     graph = StateGraph(AskState)
     graph.add_node("embed_query", _embed_query)
     graph.add_node("retrieve", _retrieve_contexts)
+    graph.add_node("rerank", _rerank_contexts)
     graph.add_node("generate", _generate_answer)
     graph.add_edge(START, "embed_query")
     graph.add_edge("embed_query", "retrieve")
-    graph.add_edge("retrieve", "generate")
+    graph.add_edge("retrieve", "rerank")
+    graph.add_edge("rerank", "generate")
     graph.add_edge("generate", END)
     return graph.compile()
 
@@ -96,7 +99,14 @@ def _load_ingest_docs(state: IngestState) -> IngestState:
             skipped += 1
             continue
         old_chunk_ids.extend(manifest.old_chunk_ids(source_key))
-        docs.extend(load_input(source))
+        docs.extend(
+            load_input(
+                source,
+                pdf_ocr_enabled=config.pdf_ocr_enabled,
+                pdf_ocr_language=config.pdf_ocr_language,
+                pdf_min_extracted_chars=config.pdf_min_extracted_chars,
+            )
+        )
         changed_sources.append({"source_key": source_key, "source_hash": source_hash})
 
     return {
@@ -132,6 +142,7 @@ def _store_chunks(state: IngestState) -> IngestState:
         store.delete_source(source["source_key"])
     chunks = state.get("chunks", [])
     store.upsert(chunks, state.get("embeddings", []))
+    store.rebuild_bm25()
 
     manifest = IndexManifest(state["config"].index_dir)
     chunks_by_source: dict[str, list[str]] = {}
@@ -159,12 +170,24 @@ def _embed_query(state: AskState) -> AskState:
 
 def _retrieve_contexts(state: AskState) -> AskState:
     store = VectorStore(state["config"].index_dir)
+    limit = state["config"].candidate_k if state["config"].rerank_enabled else state["config"].top_k
     contexts = store.hybrid_query(
         state["query_embedding"],
         state.get("expanded_question", state["question"]),
-        state["config"].top_k,
+        limit,
     )
     return {"contexts": contexts}
+
+
+def _rerank_contexts(state: AskState) -> AskState:
+    config = state["config"]
+    contexts = state.get("contexts", [])
+    if not config.rerank_enabled or len(contexts) <= config.top_k:
+        return {"contexts": contexts[: config.top_k]}
+
+    reranker = CrossEncoderReranker(config.rerank_model)
+    ranked = reranker.rerank(state.get("expanded_question", state["question"]), contexts, config.top_k)
+    return {"contexts": ranked}
 
 
 def _generate_answer(state: AskState) -> AskState:
@@ -184,7 +207,13 @@ def _generate_answer(state: AskState) -> AskState:
 
 
 def _load_summary_docs(state: SummarizeState) -> SummarizeState:
-    docs = load_input(state["target"])
+    config = state["config"]
+    docs = load_input(
+        state["target"],
+        pdf_ocr_enabled=config.pdf_ocr_enabled,
+        pdf_ocr_language=config.pdf_ocr_language,
+        pdf_min_extracted_chars=config.pdf_min_extracted_chars,
+    )
     text = "\n\n".join(doc.text for doc in docs)
     target = state["target"]
     title = Path(target).name if not target.startswith("http") else target

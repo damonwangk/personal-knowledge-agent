@@ -3,11 +3,18 @@ from __future__ import annotations
 from dataclasses import dataclass
 from hashlib import sha256
 from pathlib import Path
+import shutil
+import sys
+from tempfile import TemporaryDirectory
 from urllib.parse import urljoin, urlparse
 
+import fitz
 import requests
 from bs4 import BeautifulSoup
+from PIL import Image
 from pypdf import PdfReader
+import pytesseract
+from readability import Document
 
 
 SUPPORTED_SUFFIXES = {".md", ".mdx", ".txt", ".pdf", ".html", ".htm"}
@@ -30,7 +37,13 @@ def is_url(value: str) -> bool:
     return urlparse(value).scheme in {"http", "https"}
 
 
-def load_input(value: str) -> list[SourceDocument]:
+def load_input(
+    value: str,
+    *,
+    pdf_ocr_enabled: bool = False,
+    pdf_ocr_language: str = "eng",
+    pdf_min_extracted_chars: int = 80,
+) -> list[SourceDocument]:
     if is_url(value):
         return [load_url(value)]
 
@@ -39,9 +52,21 @@ def load_input(value: str) -> list[SourceDocument]:
         docs: list[SourceDocument] = []
         for file_path in sorted(path.rglob("*")):
             if file_path.suffix.lower() in SUPPORTED_SUFFIXES:
-                docs.extend(load_file(file_path))
+                docs.extend(
+                    load_file(
+                        file_path,
+                        pdf_ocr_enabled=pdf_ocr_enabled,
+                        pdf_ocr_language=pdf_ocr_language,
+                        pdf_min_extracted_chars=pdf_min_extracted_chars,
+                    )
+                )
         return docs
-    return load_file(path)
+    return load_file(
+        path,
+        pdf_ocr_enabled=pdf_ocr_enabled,
+        pdf_ocr_language=pdf_ocr_language,
+        pdf_min_extracted_chars=pdf_min_extracted_chars,
+    )
 
 
 def discover_sources(value: str) -> list[str]:
@@ -68,7 +93,13 @@ def source_fingerprint(value: str) -> tuple[str, str]:
     return str(path), sha256(path.read_bytes()).hexdigest()
 
 
-def load_file(path: Path) -> list[SourceDocument]:
+def load_file(
+    path: Path,
+    *,
+    pdf_ocr_enabled: bool = False,
+    pdf_ocr_language: str = "eng",
+    pdf_min_extracted_chars: int = 80,
+) -> list[SourceDocument]:
     suffix = path.suffix.lower()
     if suffix in {".md", ".mdx", ".txt", ".html", ".htm"}:
         raw_text = path.read_text(encoding="utf-8", errors="ignore")
@@ -92,16 +123,29 @@ def load_file(path: Path) -> list[SourceDocument]:
             )
         ]
     if suffix == ".pdf":
-        return load_pdf(path)
+        return load_pdf(
+            path,
+            ocr_enabled=pdf_ocr_enabled,
+            ocr_language=pdf_ocr_language,
+            min_extracted_chars=pdf_min_extracted_chars,
+        )
     raise ValueError(f"Unsupported file type: {path}")
 
 
-def load_pdf(path: Path) -> list[SourceDocument]:
+def load_pdf(
+    path: Path,
+    *,
+    ocr_enabled: bool = False,
+    ocr_language: str = "eng",
+    min_extracted_chars: int = 80,
+) -> list[SourceDocument]:
     reader = PdfReader(str(path))
     file_hash = sha256(path.read_bytes()).hexdigest()
     docs: list[SourceDocument] = []
     for index, page in enumerate(reader.pages, start=1):
         text = page.extract_text() or ""
+        if ocr_enabled and len(text.strip()) < min_extracted_chars:
+            text = ocr_pdf_page(path, index, ocr_language) or text
         if text.strip():
             docs.append(
                 SourceDocument(
@@ -115,6 +159,38 @@ def load_pdf(path: Path) -> list[SourceDocument]:
                 )
             )
     return docs
+
+
+def ocr_pdf_page(path: Path, page_number: int, language: str) -> str:
+    configure_tesseract()
+    try:
+        pytesseract.get_tesseract_version()
+    except Exception:
+        return ""
+
+    try:
+        with TemporaryDirectory() as tmp_dir:
+            document = fitz.open(str(path))
+            page = document.load_page(page_number - 1)
+            # 2 倍缩放约等于 144 DPI，速度和识别质量对小型样本比较均衡。
+            pixmap = page.get_pixmap(matrix=fitz.Matrix(2, 2), alpha=False)
+            image_path = Path(tmp_dir) / f"page-{page_number}.png"
+            pixmap.save(str(image_path))
+            image = Image.open(image_path)
+            try:
+                return pytesseract.image_to_string(image, lang=language).strip()
+            except pytesseract.TesseractError:
+                return pytesseract.image_to_string(image, lang="eng").strip()
+    except Exception:
+        return ""
+
+
+def configure_tesseract() -> None:
+    if shutil.which("tesseract"):
+        return
+    env_tesseract = Path(sys.executable).resolve().parent / "tesseract"
+    if env_tesseract.exists():
+        pytesseract.pytesseract.tesseract_cmd = str(env_tesseract)
 
 
 def load_url(url: str) -> SourceDocument:
@@ -134,10 +210,17 @@ def load_url(url: str) -> SourceDocument:
 
 
 def html_to_text(html: str, base_url: str) -> tuple[str, str, str | None]:
-    soup = BeautifulSoup(html, "html.parser")
+    title, source_url = html_title_and_url(html, base_url)
+    try:
+        # Readability 先抽正文，失败时再回退到普通 HTML 清洗。
+        article = Document(html)
+        readable_html = article.summary(html_partial=True)
+        title = article.short_title() or title
+        soup = BeautifulSoup(readable_html, "html.parser")
+    except Exception:
+        soup = BeautifulSoup(html, "html.parser")
     for tag in soup(["script", "style", "nav", "footer", "header"]):
         tag.decompose()
-    title, source_url = html_title_and_url(str(soup), base_url)
     text = soup.get_text("\n", strip=True)
     return text, title, source_url
 

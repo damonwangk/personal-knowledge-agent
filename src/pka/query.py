@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import re
 
+import jieba
+
 
 STOPWORDS = {
     "a",
@@ -43,5 +45,12 @@ def expand_query(query: str) -> str:
 
 def tokenize_query(query: str) -> list[str]:
     expanded = expand_query(query)
-    terms = [term.lower() for term in re.findall(r"[\w\u4e00-\u9fff]+", expanded)]
+    return tokenize_text(expanded)
+
+
+def tokenize_text(text: str) -> list[str]:
+    normalized = text.lower()
+    chinese_tokens = [token.strip() for token in jieba.lcut(normalized) if token.strip()]
+    ascii_tokens = re.findall(r"[a-z0-9_]+", normalized)
+    terms = chinese_tokens + ascii_tokens
     return [term for term in terms if len(term) > 1 and term not in STOPWORDS]

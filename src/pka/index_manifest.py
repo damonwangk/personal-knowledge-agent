@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 
-MANIFEST_VERSION = 2
+MANIFEST_VERSION = 3
 
 
 @dataclass(frozen=True)

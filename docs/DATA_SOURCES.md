@@ -1,6 +1,6 @@
 # 样例数据来源
 
-本项目样例数据用于本地 RAG 功能测试，刻意控制在个人电脑可轻松处理的范围内。PDF 文件如果用普通文本编辑器打开会显示二进制内容，这是 PDF 格式本身的压缩流；请用 PDF 阅读器打开，或查看 `docs/pdf_previews/` 中由 `pypdf` 抽取的文本预览。
+本项目样例数据用于本地 RAG 功能测试，刻意控制在小型本地知识库可处理的范围内。PDF 文件如果用普通文本编辑器打开会显示二进制内容，这是 PDF 格式本身的压缩流；请用 PDF 阅读器打开。项目读取 PDF 时会优先使用 `pypdf` 抽取文本，抽取文本不足时会通过 Tesseract OCR 兜底识别。
 
 ## PDF 论文
 
@@ -43,3 +43,13 @@ docs/pdf_previews/
 | `data/notes/go_strategy.md` | 围棋入门知识。 |
 | `data/notes/minecraft_survival.md` | Minecraft 生存模式知识。 |
 | `data/notes/rag_agent_design.md` | 项目自身 RAG/Agent 设计笔记。 |
+
+## Hugging Face 小样本
+
+这些文件由 `scripts/download_hf_sample_data.py` 通过 Hugging Face Dataset Viewer API 拉取少量 rows 后转成 Markdown。只保存少量样本，不下载完整数据集。
+
+| 文件 | 数据集 | 说明 |
+|---|---|---|
+| `data/hf/huggingfacefw_fineweb_edu.md` | `HuggingFaceFW/fineweb-edu` | 教育网页文本样本，用于测试较长网页正文检索。 |
+| `data/hf/sentence_transformers_natural_questions.md` | `sentence-transformers/natural-questions` | 问答样本，用于测试自然语言问题和答案片段检索。 |
+| `data/hf/mongodb_embedded_movies.md` | `MongoDB/embedded_movies` | 电影结构化条目转 Markdown，用于测试标题、字段和正文混合检索。 |

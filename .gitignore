@@ -2,6 +2,7 @@
 .env
 data/raw/
 data/web/
+data/hf/
 docs/TASK_PLAN.md
 docs/pdf_previews/
 __pycache__/
