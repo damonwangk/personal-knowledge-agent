@@ -1,0 +1,11 @@
+.pka/
+.env
+data/raw/
+data/web/
+docs/TASK_PLAN.md
+docs/pdf_previews/
+__pycache__/
+*.pyc
+*.egg-info/
+.pytest_cache/
+.DS_Store

@@ -1,0 +1,16 @@
+knowledge_root: data
+index_dir: .pka
+
+embedding:
+  provider: sentence_transformers
+  model: sentence-transformers/all-MiniLM-L6-v2
+
+llm:
+  provider: deepseek
+  base_url: https://api.deepseek.com
+  model: deepseek-v4-flash
+
+retrieval:
+  chunk_size_chars: 1600
+  chunk_overlap_chars: 220
+  top_k: 5
